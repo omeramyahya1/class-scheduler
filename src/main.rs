@@ -1,3 +1,8 @@
+pub mod schema;
+pub mod models;
+pub mod importer;
+pub mod db;
+
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -174,6 +179,64 @@ impl Timetable {
     }
 }
 
-fn main() {
-    println!("Hello World!")
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Parser)]
+#[command(name = "classes_scheduler")]
+#[command(about = "Classes Scheduler CLI tool", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Import configuration from excel or csv file
+    Import {
+        /// Path to the input file
+        #[arg(short, long)]
+        file: String,
+
+        /// Format of the input file (excel or csv)
+        #[arg(short, long, value_enum)]
+        format: Format,
+    },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Format {
+    Excel,
+    Csv,
+}
+
+use diesel::Connection;
+
+fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    let args = Cli::parse();
+
+    match args.command {
+        Commands::Import { file, format } => {
+            println!("Importing from {} with format {:?}", file, format);
+            
+            // 1. Parse file
+            let imported_data = match format {
+                Format::Excel => importer::excel::parse_excel(&file)?,
+                Format::Csv => importer::csv_parser::parse_csv(&file)?,
+            };
+
+            // 2. Connect to database
+            let database_url = std::env::var("DATABASE_URL")
+                .map_err(|_| anyhow::anyhow!("DATABASE_URL environment variable must be set"))?;
+            
+            let mut conn = diesel::pg::PgConnection::establish(&database_url)
+                .map_err(|e| anyhow::anyhow!("Error connecting to database {}: {:?}", database_url, e))?;
+
+            // 3. Bulk import
+            db::repo::bulk_import(&mut conn, imported_data)?;
+            println!("Successfully imported configuration into database.");
+        }
+    }
+
+    Ok(())
 }
