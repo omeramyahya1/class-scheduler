@@ -1,3 +1,9 @@
+# Builds
 /target
 
+
+# Agents
 .agents
+
+# Enviroment Variables
+.env*
