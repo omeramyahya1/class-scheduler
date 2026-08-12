@@ -1,50 +1,179 @@
-#![allow(unused)]
-#![allow(dead_code)]
+use chrono::NaiveDate;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
-use std::collections::HashMap;
+// ==========================================
+// Strongly Typed IDs & Basic Enums
+// ==========================================
 
-enum School {
-    Primary,
-    Middle,
-    Secondary,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TeacherId(pub u32);
 
-enum Schedule {
-    Teacher,
-    ClassRoom,
-    Teachers,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ClassroomId(pub u32);
 
-enum Day {
-    Sunaday,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SubjectId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DayOfWeek {
+    Sunday, // Standard Middle Eastern school week starts Sunday
     Monday,
     Tuesday,
     Wednesday,
     Thursday,
-    Friday,
-    Saturday,
 }
 
-struct Teacher {
-    name: String,
-    subjects: Vec<Subject>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TimeSlot {
+    pub day: DayOfWeek,
+    pub period: u8, // Period 1, 2, 3...
 }
 
-struct Class(Subject, Teacher, ClassRoom);
+// ==========================================
+// Primary Data Models
+// ==========================================
 
-struct Subject {
-    name: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Subject {
+    pub id: SubjectId,
+    pub name: String,
+    /// Default required periods per week for a normal class
+    pub base_periods_per_week: u8,
 }
 
-struct ClassRoom(char);
-
-struct Grade {
-    school: School,
-    class_rooms: Vec<ClassRoom>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Teacher {
+    pub id: TeacherId,
+    pub name: String,
+    /// Subjects this teacher is qualified to teach
+    pub qualified_subjects: HashSet<SubjectId>,
+    /// Preferred periods (Soft Constraint)
+    pub preferences: Vec<TimeSlotPreference>,
+    /// Max periods this teacher can teach per day/week
+    pub max_daily_periods: u8,
+    pub max_weekly_periods: u8,
 }
 
-struct TimeTable(HashMap<Day, Vec<Class>>);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Classroom {
+    pub id: ClassroomId,
+    /// e.g. "Grade 10 - Section A"
+    pub name: String,
+    pub grade_level: u8,
+}
+
+// ==========================================
+// Academic Progress & Dynamic Scheduling
+// ==========================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcademicProgress {
+    pub classroom_id: ClassroomId,
+    pub subject_id: SubjectId,
+    /// Current curriculum progress ratio (e.g. 0.75 = 75% complete)
+    pub current_progress_ratio: f32,
+    /// Targeted ratio by the current date
+    pub expected_progress_ratio: f32,
+}
+
+impl AcademicProgress {
+    /// Calculate adjusted weekly periods based on whether the class is behind schedule
+    pub fn calculate_required_periods(&self, base_periods: u8) -> u8 {
+        if self.current_progress_ratio < self.expected_progress_ratio {
+            let lag_factor = self.expected_progress_ratio - self.current_progress_ratio;
+            // Boost periods if falling significantly behind (e.g., +1 or +2 extra slots/week)
+            base_periods + (lag_factor * 4.0).round() as u8
+        } else {
+            base_periods
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CalendarEvent {
+    NationalHoliday(NaiveDate),
+    EmergencyBreak {
+        start: NaiveDate,
+        end: NaiveDate,
+        reason: String,
+    },
+}
+
+// ==========================================
+// Constraints (Hard & Soft)
+// ==========================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeSlotPreference {
+    pub slot: TimeSlot,
+    /// Positive values = Preferred, Negative values = Disliked/Unavailable
+    pub preference_score: i8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HardConstraint {
+    /// A teacher cannot teach two classes at the same slot
+    TeacherNoOverlap,
+    /// A classroom can only have one teacher at a time
+    ClassroomNoOverlap,
+    /// Fixed periods (e.g. Sunday Period 1 is always Morning Assembly)
+    FixedSlot {
+        classroom_id: ClassroomId,
+        subject_id: SubjectId,
+        slot: TimeSlot,
+    },
+    /// Teacher cannot teach more than N consecutive periods
+    MaxConsecutivePeriods {
+        teacher_id: TeacherId,
+        max_periods: u8,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SoftConstraint {
+    /// Honor teacher preferred/disliked time slots
+    TeacherPreference { teacher_id: TeacherId, weight: u32 },
+    /// Minimize gaps/free periods in a teacher's middle of the day
+    MinimizeTeacherGaps { teacher_id: TeacherId, weight: u32 },
+    /// Spread subject evenly throughout the week (don't stack Math 3 times on Sunday)
+    DistributeSubjectEvenly {
+        classroom_id: ClassroomId,
+        subject_id: SubjectId,
+        weight: u32,
+    },
+}
+
+// ==========================================
+// Solution / Timetable Output Structure
+// ==========================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleAssignment {
+    pub classroom_id: ClassroomId,
+    pub subject_id: SubjectId,
+    pub teacher_id: TeacherId,
+    pub slot: TimeSlot,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Timetable {
+    pub assignments: Vec<ScheduleAssignment>,
+}
+
+impl Timetable {
+    /// Quick lookup helper to check if a teacher is busy at a given slot
+    pub fn get_teacher_assignment(
+        &self,
+        teacher_id: TeacherId,
+        slot: TimeSlot,
+    ) -> Option<&ScheduleAssignment> {
+        self.assignments
+            .iter()
+            .find(|a| a.teacher_id == teacher_id && a.slot == slot)
+    }
+}
 
 fn main() {
-    println!("Hello, world!");
+    println!("Hello World!")
 }
